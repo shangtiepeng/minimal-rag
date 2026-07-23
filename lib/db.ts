@@ -19,7 +19,6 @@ let idCounter = 0;
  * 初始化（内存版无需操作）
  */
 export async function initDatabase() {
-  // 内存存储，无需初始化
   console.log("Using in-memory vector store");
 }
 
@@ -57,30 +56,26 @@ function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 /**
- * 向量相似度搜索：找到与查询最相关的文档片段
+ * 向量相似度搜索
  */
 export async function querySimilarDocs(
   queryEmbedding: number[],
   topK: number = 3
 ): Promise<{ id: number; content: string; similarity: number }[]> {
-  if (memoryStore.length === 0) {
-    return [];
-  }
+  if (memoryStore.length === 0) return [];
 
-  // 计算所有文档的相似度
   const scored = memoryStore.map((doc) => ({
     id: doc.id,
     content: doc.content,
     similarity: cosineSimilarity(queryEmbedding, doc.embedding),
   }));
 
-  // 按相似度排序，取 topK
   scored.sort((a, b) => b.similarity - a.similarity);
   return scored.slice(0, topK);
 }
 
 /**
- * 获取所有文档片段（管理页面用）
+ * 获取所有文档片段
  */
 export async function getAllDocs() {
   return memoryStore.map((doc) => ({
@@ -96,7 +91,5 @@ export async function getAllDocs() {
  */
 export async function deleteDocChunk(id: number) {
   const index = memoryStore.findIndex((doc) => doc.id === id);
-  if (index !== -1) {
-    memoryStore.splice(index, 1);
-  }
+  if (index !== -1) memoryStore.splice(index, 1);
 }
