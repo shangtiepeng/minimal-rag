@@ -2,6 +2,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 
 const apiKey = process.env.OPENAI_API_KEY;
 export const chatModel = process.env.OPENAI_CHAT_MODEL?.trim() || "gpt-4o-mini";
+const baseUrl = (process.env.OPENAI_BASE_URL?.trim() || "https://api.openai.com/v1").replace(/\/$/, "");
 
 async function openaiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const response = await fetch(input, init);
@@ -19,10 +20,20 @@ async function openaiFetch(input: RequestInfo | URL, init?: RequestInit): Promis
 }
 
 export const openai = createOpenAI({
-  baseURL: process.env.OPENAI_BASE_URL?.trim() || undefined,
+  baseURL: baseUrl,
   apiKey: apiKey || "",
   fetch: openaiFetch,
 });
+
+export async function openaiApiFetch(path: string, init: RequestInit): Promise<Response> {
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${apiKey || ""}`);
+
+  return openaiFetch(`${baseUrl}/${path.replace(/^\//, "")}`, {
+    ...init,
+    headers,
+  });
+}
 
 function getStatusCode(error: unknown): number | undefined {
   if (typeof error !== "object" || error === null || !("statusCode" in error)) {
