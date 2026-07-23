@@ -31,7 +31,48 @@ export async function POST(req: Request) {
       messages,
     });
 
-    return result.toTextStreamResponse();
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        let hasText = false;
+
+        try {
+          for await (const part of result.fullStream) {
+            if (part.type === "text-delta") {
+              hasText = true;
+              controller.enqueue(encoder.encode(part.textDelta));
+              continue;
+            }
+
+            if (part.type === "error") {
+              const message = getProviderErrorMessage(part.error);
+              console.error("Chat stream error:", message);
+              controller.enqueue(encoder.encode(`❌ ${message}`));
+              return;
+            }
+          }
+
+          if (!hasText) {
+            controller.enqueue(
+              encoder.encode("❌ AI 服务没有返回内容，请检查 Vercel 中的 AI 服务配置后重试。")
+            );
+          }
+        } catch (error: unknown) {
+          const message = getProviderErrorMessage(error);
+          console.error("Chat stream error:", message);
+          controller.enqueue(encoder.encode(`❌ ${message}`));
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+      },
+    });
   } catch (error: unknown) {
     console.error("Chat error:", getProviderErrorMessage(error));
     return Response.json({ error: getProviderErrorMessage(error) }, { status: 500 });

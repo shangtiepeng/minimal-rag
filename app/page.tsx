@@ -254,6 +254,15 @@ export default function ChatPage() {
         );
       }
       assistantContent += decoder.decode();
+
+      if (!assistantContent.trim()) {
+        assistantContent = "❌ AI 服务没有返回内容，请检查 Vercel 中的 AI 服务配置后重试。";
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, content: assistantContent } : m
+          )
+        );
+      }
     } catch (error: unknown) {
       setMessages((prev) => [
         ...prev,
