@@ -1,5 +1,10 @@
-import { openai } from "@ai-sdk/openai";
+import { createOpenAI } from "@ai-sdk/openai";
 import { streamText } from "ai";
+
+const openai = createOpenAI({
+  baseURL: process.env.OPENAI_BASE_URL,
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 // 允许流式响应最长 30 秒
 export const maxDuration = 30;
