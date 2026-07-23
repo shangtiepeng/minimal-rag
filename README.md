@@ -1,11 +1,11 @@
 # Minimal RAG - 极简知识库问答
 
-基于 Next.js + Vercel AI SDK + Neon Postgres(pgvector) 的极简 RAG 问答应用。
+基于 Next.js + Vercel AI SDK 的极简 RAG 问答应用。知识库文档和向量保存在浏览器 IndexedDB，无需外部数据库。
 
 ## 功能
 
 - 💬 对话式问答，基于知识库回答
-- 📚 知识库管理：粘贴文本即可上传，自动切分+向量化
+- 📚 知识库管理：粘贴文本或导入公开网页、TXT、Markdown 链接，自动切分+向量化
 - ⚡ 流式输出，实时返回答案
 - 🎯 向量相似度检索，精准匹配相关知识片段
 
@@ -17,7 +17,7 @@ npm install
 
 # 2. 配置环境变量
 cp .env.example .env.local
-# 编辑 .env.local 填入 OPENAI_API_KEY 和 DATABASE_URL
+# 编辑 .env.local 填入 OPENAI_API_KEY
 
 # 3. 启动开发服务器
 npm run dev
@@ -47,24 +47,18 @@ git push -u origin main
 3. Import 你的 `minimal-rag` 仓库
 4. 添加环境变量：
    - `OPENAI_API_KEY` - 你的 OpenAI Key
-   - `DATABASE_URL` - Neon Postgres 连接串
+   - `OPENAI_BASE_URL` - 可选。使用第三方 OpenAI 兼容服务时填写 API 基础地址，例如 `https://api.openai.com/v1`
 5. 点击 Deploy，等待构建完成
-
-### 3. 配置 Neon Postgres（免费）
-
-1. 去 https://neon.tech 注册（可用 GitHub 登录）
-2. 创建一个项目，获取连接串
-3. 将连接串填入 Vercel 环境变量 `DATABASE_URL`
 
 ## 使用流程
 
 1. 打开应用，点击右上角「管理知识库」
-2. 粘贴你的文档内容，点击上传
+2. 粘贴文档内容，或填入公开网页、TXT、Markdown 链接并提取正文
 3. 在聊天框提问，AI 会基于上传的文档回答
 
 ## 技术栈
 
 - **前端**: Next.js 14 App Router + Tailwind CSS
 - **AI**: Vercel AI SDK + OpenAI (gpt-4o-mini + text-embedding-3-small)
-- **向量存储**: Neon Postgres + pgvector
+- **向量存储**: 浏览器 IndexedDB
 - **部署**: Vercel

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import { saveAllChunks, getAllStoredChunks, deleteStoredChunk, clearAllChunks, getChunksCount } from "@/lib/indexedDB";
 
 interface Chunk {
@@ -17,6 +17,51 @@ interface Message {
   content: string;
 }
 
+interface EmbedResponse {
+  pieces: Array<{
+    content: string;
+    embedding: number[];
+  }>;
+}
+
+interface UrlImportResponse {
+  title: string;
+  source: string;
+  text: string;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "请求失败";
+}
+
+function getResponseError(data: unknown, fallback: string): string {
+  if (typeof data === "object" && data !== null && "error" in data && typeof data.error === "string") {
+    return data.error;
+  }
+  return fallback;
+}
+
+async function readJsonResponse<T>(response: Response): Promise<T> {
+  const rawText = await response.text();
+  let data: unknown;
+
+  try {
+    data = rawText ? JSON.parse(rawText) : {};
+  } catch {
+    throw new Error(
+      response.ok
+        ? "服务返回了非 JSON 响应，请稍后重试。"
+        : `请求失败（HTTP ${response.status}）`
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(getResponseError(data, `请求失败（HTTP ${response.status}）`));
+  }
+
+  return data as T;
+}
+
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -24,7 +69,9 @@ export default function ChatPage() {
   const [showUpload, setShowUpload] = useState(false);
   const [uploadText, setUploadText] = useState("");
   const [uploadSource, setUploadSource] = useState("");
+  const [uploadUrl, setUploadUrl] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [importingUrl, setImportingUrl] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
   const [chunksCount, setChunksCount] = useState(0);
   const [isLoadingChunks, setIsLoadingChunks] = useState(true);
@@ -74,9 +121,8 @@ export default function ChatPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: uploadText, source: uploadSource || "网页上传" }),
       });
-      const data = await res.json();
-
-      if (!res.ok) throw new Error(data.error || "处理失败");
+      const data = await readJsonResponse<EmbedResponse>(res);
+      if (!Array.isArray(data.pieces)) throw new Error("服务返回的数据格式不正确");
 
       // 保存到 IndexedDB
       const newChunks: Chunk[] = [];
@@ -97,10 +143,35 @@ export default function ChatPage() {
       setUploadMsg(`✅ 成功！已切分为 ${newChunks.length} 个片段存入本地`);
       setUploadText("");
       setUploadSource("");
-    } catch (err: any) {
-      setUploadMsg(`❌ ${err.message}`);
+    } catch (error: unknown) {
+      setUploadMsg(`❌ ${getErrorMessage(error)}`);
     }
     setUploading(false);
+  };
+
+  const handleUrlImport = async () => {
+    if (!uploadUrl.trim()) return;
+
+    setImportingUrl(true);
+    setUploadMsg("正在提取链接正文...");
+
+    try {
+      const response = await fetch("/api/import-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: uploadUrl }),
+      });
+      const data = await readJsonResponse<UrlImportResponse>(response);
+
+      setUploadText(data.text);
+      setUploadSource(data.title || data.source);
+      setUploadUrl("");
+      setUploadMsg("✅ 已提取链接正文，请确认后上传到知识库");
+    } catch (error: unknown) {
+      setUploadMsg(`❌ ${getErrorMessage(error)}`);
+    }
+
+    setImportingUrl(false);
   };
 
   // 本地 RAG 检索
@@ -115,7 +186,7 @@ export default function ChatPage() {
         body: JSON.stringify({ text: query }),
       });
       if (!embedRes.ok) return [];
-      const { pieces } = await embedRes.json();
+      const { pieces } = await readJsonResponse<EmbedResponse>(embedRes);
       if (!pieces || pieces.length === 0) return [];
       const queryEmbedding = pieces[0].embedding;
 
@@ -161,19 +232,20 @@ export default function ChatPage() {
         }),
       });
 
-      if (!res.ok) throw new Error("请求失败");
+      if (!res.ok) await readJsonResponse<never>(res);
 
       const reader = res.body?.getReader();
+      if (!reader) throw new Error("服务未返回可读取的内容");
       const decoder = new TextDecoder();
       let assistantContent = "";
       const assistantId = (Date.now() + 1).toString();
 
       setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
 
-      while (reader) {
+      while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value);
+        const chunk = decoder.decode(value, { stream: true });
         assistantContent += chunk;
         setMessages((prev) =>
           prev.map((m) =>
@@ -181,10 +253,11 @@ export default function ChatPage() {
           )
         );
       }
-    } catch (err: any) {
+      assistantContent += decoder.decode();
+    } catch (error: unknown) {
       setMessages((prev) => [
         ...prev,
-        { id: (Date.now() + 1).toString(), role: "assistant", content: `❌ 出错了：${err.message}` },
+        { id: (Date.now() + 1).toString(), role: "assistant", content: `❌ 出错了：${getErrorMessage(error)}` },
       ]);
     }
     setIsLoading(false);
@@ -230,6 +303,25 @@ export default function ChatPage() {
       {/* 知识库上传区 */}
       {showUpload && (
         <div className="p-4 border-b border-[var(--border)] bg-[var(--surface)] space-y-3">
+          <div>
+            <label className="text-sm text-[var(--text-muted)] mb-1 block">导入链接文档</label>
+            <div className="flex gap-2">
+              <input
+                type="url"
+                value={uploadUrl}
+                onChange={(e) => setUploadUrl(e.target.value)}
+                placeholder="https://example.com/document"
+                className="min-w-0 flex-1 px-3 py-2 rounded-lg bg-[var(--bg)] border border-[var(--border)] text-sm focus:outline-none focus:border-[var(--accent)]"
+              />
+              <button
+                onClick={handleUrlImport}
+                disabled={importingUrl || !uploadUrl.trim()}
+                className="shrink-0 px-3 py-2 text-sm rounded-lg bg-[var(--surface)] border border-[var(--border)] disabled:opacity-40 hover:border-[var(--accent)] transition"
+              >
+                {importingUrl ? "提取中..." : "提取内容"}
+              </button>
+            </div>
+          </div>
           <div>
             <label className="text-sm text-[var(--text-muted)] mb-1 block">文档来源（可选）</label>
             <input
