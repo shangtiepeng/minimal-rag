@@ -15,11 +15,24 @@ function getStatusCode(error: unknown): number | undefined {
   return typeof error.statusCode === "number" ? error.statusCode : undefined;
 }
 
+function getResponseText(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("text" in error)) {
+    return undefined;
+  }
+
+  return typeof error.text === "string" ? error.text : undefined;
+}
+
 export function getProviderErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "AI 服务请求失败";
   const statusCode = getStatusCode(error);
+  const responseText = getResponseText(error);
 
-  if (/Unexpected token ['\"]?<|<!doctype html/i.test(message)) {
+  const receivedHtml =
+    /Unexpected token ['\"]?<|<!doctype html/i.test(message) ||
+    (/Invalid JSON response/i.test(message) && /<!doctype html|<html/i.test(responseText || ""));
+
+  if (receivedHtml) {
     return "AI 服务返回了网页 HTML，而不是 OpenAI 兼容 API 的 JSON。请检查 Vercel 中的 OPENAI_BASE_URL 和 OPENAI_API_KEY。";
   }
 
