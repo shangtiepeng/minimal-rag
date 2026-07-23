@@ -2,9 +2,25 @@ import { createOpenAI } from "@ai-sdk/openai";
 
 const apiKey = process.env.OPENAI_API_KEY;
 
+async function openaiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const response = await fetch(input, init);
+  const contentType = response.headers.get("content-type")?.toLowerCase() || "";
+
+  // A misconfigured base URL can return a provider's web page with HTTP 200.
+  // The streaming parser treats that as an empty stream unless we reject it here.
+  if (contentType.includes("text/html")) {
+    throw new Error(
+      "AI 服务返回了网页 HTML，而不是 OpenAI 兼容 API 的 JSON。请检查 Vercel 中的 OPENAI_BASE_URL 和 OPENAI_API_KEY。"
+    );
+  }
+
+  return response;
+}
+
 export const openai = createOpenAI({
   baseURL: process.env.OPENAI_BASE_URL?.trim() || undefined,
   apiKey: apiKey || "",
+  fetch: openaiFetch,
 });
 
 function getStatusCode(error: unknown): number | undefined {
