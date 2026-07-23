@@ -30,7 +30,8 @@ export function getProviderErrorMessage(error: unknown): string {
 
   const receivedHtml =
     /Unexpected token ['\"]?<|<!doctype html/i.test(message) ||
-    (/Invalid JSON response/i.test(message) && /<!doctype html|<html/i.test(responseText || ""));
+    /Invalid JSON response/i.test(message) ||
+    /<!doctype html|<html/i.test(responseText || "");
 
   if (receivedHtml) {
     return "AI 服务返回了网页 HTML，而不是 OpenAI 兼容 API 的 JSON。请检查 Vercel 中的 OPENAI_BASE_URL 和 OPENAI_API_KEY。";
