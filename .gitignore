@@ -1,0 +1,20 @@
+# 环境变量
+.env.local
+.env
+
+# 依赖
+node_modules/
+
+# 构建产物
+.next/
+out/
+
+# Vercel
+.vercel
+
+# 系统
+.DS_Store
+*.pem
+
+# TypeScript
+next-env.d.ts
