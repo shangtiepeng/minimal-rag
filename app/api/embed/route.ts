@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getEmbeddings } from "@/lib/embedding";
 import { splitText } from "@/lib/chunk";
-import { getProviderErrorMessage } from "@/lib/openai";
+import { createKeywordEmbeddings } from "@/lib/local-embedding";
 
 const MAX_DOCUMENT_LENGTH = 60_000;
+let providerEmbeddingsUnavailable = false;
 
 /**
  * 文档切分 + 向量化接口
@@ -31,7 +32,24 @@ export async function POST(req: NextRequest) {
 
     // 切分文档
     const rawChunks = splitText(text, 500, 50);
-    const embeddings = await getEmbeddings(rawChunks.map((chunk) => chunk.content));
+    let embeddings: number[][];
+    let embeddingMode: "semantic" | "keyword" = "semantic";
+
+    if (providerEmbeddingsUnavailable) {
+      embeddings = createKeywordEmbeddings(rawChunks.map((chunk) => chunk.content));
+      embeddingMode = "keyword";
+    } else {
+      try {
+        embeddings = await getEmbeddings(rawChunks.map((chunk) => chunk.content));
+      } catch (error: unknown) {
+        providerEmbeddingsUnavailable = true;
+        // Some OpenAI-compatible providers offer chat models but no embeddings.
+        console.warn("Embedding provider unavailable; using keyword retrieval:", error instanceof Error ? error.message : error);
+        embeddings = createKeywordEmbeddings(rawChunks.map((chunk) => chunk.content));
+        embeddingMode = "keyword";
+      }
+    }
+
     const pieces = rawChunks.map((chunk, index) => ({
       content: chunk.content,
       embedding: embeddings[index],
@@ -41,11 +59,13 @@ export async function POST(req: NextRequest) {
       success: true,
       totalPieces: pieces.length,
       pieces,
+      embeddingMode,
     });
   } catch (error: unknown) {
-    console.error("Embed error:", getProviderErrorMessage(error));
+    const message = error instanceof Error ? error.message : "向量化失败";
+    console.error("Embed error:", message);
     return NextResponse.json(
-      { error: getProviderErrorMessage(error) },
+      { error: message },
       { status: 500 }
     );
   }

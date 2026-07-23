@@ -7,6 +7,7 @@ interface Chunk {
   id: string;
   content: string;
   embedding: number[];
+  embeddingMode?: "semantic" | "keyword";
   source?: string;
   createdAt: string;
 }
@@ -18,6 +19,7 @@ interface Message {
 }
 
 interface EmbedResponse {
+  embeddingMode: "semantic" | "keyword";
   pieces: Array<{
     content: string;
     embedding: number[];
@@ -114,7 +116,7 @@ export default function ChatPage() {
   const handleUpload = async () => {
     if (!uploadText.trim()) return;
     setUploading(true);
-    setUploadMsg("正在切分和生成向量...");
+    setUploadMsg("正在切分并建立检索索引...");
     try {
       const res = await fetch("/api/embed", {
         method: "POST",
@@ -132,6 +134,7 @@ export default function ChatPage() {
           id: `chunk-${idx++}`,
           content: piece.content,
           embedding: piece.embedding,
+          embeddingMode: data.embeddingMode,
           source: uploadSource || "网页上传",
           createdAt: new Date().toISOString(),
         };
@@ -140,7 +143,8 @@ export default function ChatPage() {
       await saveAllChunks(newChunks);
       await loadChunks();
 
-      setUploadMsg(`✅ 成功！已切分为 ${newChunks.length} 个片段存入本地`);
+      const searchMode = data.embeddingMode === "keyword" ? "本地关键词检索" : "语义检索";
+      setUploadMsg(`✅ 成功！已切分为 ${newChunks.length} 个片段存入本地（${searchMode}）`);
       setUploadText("");
       setUploadSource("");
     } catch (error: unknown) {
@@ -186,15 +190,17 @@ export default function ChatPage() {
         body: JSON.stringify({ text: query }),
       });
       if (!embedRes.ok) return [];
-      const { pieces } = await readJsonResponse<EmbedResponse>(embedRes);
+      const { pieces, embeddingMode } = await readJsonResponse<EmbedResponse>(embedRes);
       if (!pieces || pieces.length === 0) return [];
       const queryEmbedding = pieces[0].embedding;
 
       // 本地计算相似度
-      const scored = chunks.map((chunk) => ({
-        content: chunk.content,
-        similarity: cosineSimilarity(queryEmbedding, chunk.embedding),
-      }));
+      const scored = chunks
+        .filter((chunk) => (chunk.embeddingMode || "semantic") === embeddingMode)
+        .map((chunk) => ({
+          content: chunk.content,
+          similarity: cosineSimilarity(queryEmbedding, chunk.embedding),
+        }));
       scored.sort((a, b) => b.similarity - a.similarity);
       return scored.slice(0, topK).map((s) => s.content);
     } catch {
