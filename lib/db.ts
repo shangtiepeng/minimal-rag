@@ -1,52 +1,26 @@
-import { neon, NeonQueryFunction } from "@neondatabase/serverless";
-
 /**
- * Neon Postgres 连接（Vercel 部署时自动集成）
- * 本地开发时使用 DATABASE_URL 环境变量
- * 使用懒加载，避免构建时因缺少 DATABASE_URL 报错
+ * 内存向量存储 - 无需数据库，部署即用
+ * 缺点：每次部署/重启后数据会清空
  */
 
 interface DocChunk {
   id: number;
   content: string;
-  similarity: number;
+  embedding: number[];
+  source?: string;
+  createdAt: Date;
 }
 
-let _sql: NeonQueryFunction<false, false> | null = null;
-
-function getSql(): NeonQueryFunction<false, false> {
-  if (!_sql) {
-    const url = process.env.DATABASE_URL;
-    if (!url) {
-      throw new Error("DATABASE_URL 未设置，请在环境变量中配置 Neon Postgres 连接串");
-    }
-    _sql = neon(url);
-  }
-  return _sql;
-}
+// 内存存储
+const memoryStore: DocChunk[] = [];
+let idCounter = 0;
 
 /**
- * 初始化数据库表（首次使用时调用）
- * 使用 pgvector 扩展存储和检索向量
+ * 初始化（内存版无需操作）
  */
 export async function initDatabase() {
-  const sql = getSql();
-  await sql`CREATE EXTENSION IF NOT EXISTS vector`;
-  await sql`
-    CREATE TABLE IF NOT EXISTS doc_chunks (
-      id SERIAL PRIMARY KEY,
-      content TEXT NOT NULL,
-      embedding vector(1536),
-      source TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `;
-  // 创建向量索引，加速相似度搜索
-  await sql`
-    CREATE INDEX IF NOT EXISTS doc_chunks_embedding_idx
-    ON doc_chunks USING ivfflat (embedding vector_cosine_ops)
-    WITH (lists = 100)
-  `;
+  // 内存存储，无需初始化
+  console.log("Using in-memory vector store");
 }
 
 /**
@@ -57,12 +31,29 @@ export async function insertDocChunk(
   embedding: number[],
   source?: string
 ) {
-  const sql = getSql();
-  const embeddingStr = `[${embedding.join(",")}]`;
-  await sql`
-    INSERT INTO doc_chunks (content, embedding, source)
-    VALUES (${content}, ${embeddingStr}::vector, ${source || null})
-  `;
+  idCounter++;
+  memoryStore.push({
+    id: idCounter,
+    content,
+    embedding,
+    source,
+    createdAt: new Date(),
+  });
+}
+
+/**
+ * 余弦相似度计算
+ */
+function cosineSimilarity(a: number[], b: number[]): number {
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dotProduct += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
 /**
@@ -71,32 +62,41 @@ export async function insertDocChunk(
 export async function querySimilarDocs(
   queryEmbedding: number[],
   topK: number = 3
-): Promise<DocChunk[]> {
-  const sql = getSql();
-  const embeddingStr = `[${queryEmbedding.join(",")}]`;
+): Promise<{ id: number; content: string; similarity: number }[]> {
+  if (memoryStore.length === 0) {
+    return [];
+  }
 
-  const rows = await sql`
-    SELECT id, content, 1 - (embedding <=> ${embeddingStr}::vector) AS similarity
-    FROM doc_chunks
-    ORDER BY embedding <=> ${embeddingStr}::vector
-    LIMIT ${topK}
-  `;
+  // 计算所有文档的相似度
+  const scored = memoryStore.map((doc) => ({
+    id: doc.id,
+    content: doc.content,
+    similarity: cosineSimilarity(queryEmbedding, doc.embedding),
+  }));
 
-  return rows as DocChunk[];
+  // 按相似度排序，取 topK
+  scored.sort((a, b) => b.similarity - a.similarity);
+  return scored.slice(0, topK);
 }
 
 /**
  * 获取所有文档片段（管理页面用）
  */
 export async function getAllDocs() {
-  const sql = getSql();
-  return await sql`SELECT id, content, source, created_at FROM doc_chunks ORDER BY created_at DESC`;
+  return memoryStore.map((doc) => ({
+    id: doc.id,
+    content: doc.content,
+    source: doc.source,
+    created_at: doc.createdAt.toISOString(),
+  }));
 }
 
 /**
  * 删除指定文档片段
  */
 export async function deleteDocChunk(id: number) {
-  const sql = getSql();
-  await sql`DELETE FROM doc_chunks WHERE id = ${id}`;
+  const index = memoryStore.findIndex((doc) => doc.id === id);
+  if (index !== -1) {
+    memoryStore.splice(index, 1);
+  }
 }
