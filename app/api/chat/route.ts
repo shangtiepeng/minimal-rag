@@ -8,7 +8,7 @@ export async function POST(req: Request) {
   const { messages } = await req.json();
 
   // 取最后一条用户消息，做 RAG 检索
-  const lastUserMessage = messages.findLast((m: any) => m.role === "user");
+  const lastUserMessage = [...messages].reverse().find((m: any) => m.role === "user");
   const userQuery = lastUserMessage?.content || "";
 
   // 检索相关文档片段
@@ -21,7 +21,7 @@ export async function POST(req: Request) {
 ## 知识片段：
 ${contextDocs.map((doc, i) => `[片段${i + 1}] ${doc.content}`).join("\n\n")}`;
 
-  const result = streamText({
+  const result = await streamText({
     model: openai("gpt-4o-mini"),
     system: systemPrompt,
     messages,
