@@ -18,3 +18,4 @@ out/
 
 # TypeScript
 next-env.d.ts
+.env*
