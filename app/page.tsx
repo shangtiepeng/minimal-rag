@@ -218,7 +218,16 @@ export default function ChatPage() {
         ? `\n\n## 参考知识：\n${relevantDocs.map((d, i) => `[${i + 1}] ${d}`).join("\n")}`
         : "";
 
-      const systemPrompt = `你是一个基于知识库回答问题的助手。如果知识库中有相关信息，请基于它回答；如果没有，请诚实说明"知识库中没有找到相关信息"，不要编造。${contextSection}`;
+      const currentTime = new Intl.DateTimeFormat("zh-CN", {
+        dateStyle: "full",
+        timeStyle: "short",
+        hour12: false,
+        timeZone: "Asia/Shanghai",
+      }).format(new Date());
+      const knowledgeInstruction = relevantDocs.length > 0
+        ? "知识库中有参考资料时，优先基于参考资料回答；资料不足时明确说明，不要编造资料中的事实。"
+        : "当前知识库没有相关资料。日常交流、常识和基于当前时间的问题可以直接回答；天气、新闻、行情等实时信息必须说明本应用尚未接入联网搜索，不能编造。";
+      const systemPrompt = `你是一个基于知识库回答问题的助手。当前中国标准时间：${currentTime}。${knowledgeInstruction}${contextSection}`;
 
       // 流式调用 LLM
       const res = await fetch("/api/chat", {

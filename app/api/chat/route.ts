@@ -42,6 +42,15 @@ function getTextDelta(data: unknown): string {
     : "";
 }
 
+function getFinishReason(data: unknown): string | undefined {
+  if (typeof data !== "object" || data === null || !("choices" in data) || !Array.isArray(data.choices)) {
+    return undefined;
+  }
+
+  const finishReason = data.choices[0]?.finish_reason;
+  return typeof finishReason === "string" ? finishReason : undefined;
+}
+
 export async function POST(req: Request) {
   try {
     const body: unknown = await req.json();
@@ -61,7 +70,7 @@ export async function POST(req: Request) {
         model: chatModel,
         messages,
         stream: true,
-        ...(chatModel.startsWith("gpt-5") ? { max_completion_tokens: 256 } : {}),
+        ...(chatModel.startsWith("gpt-5") ? { max_completion_tokens: 1024 } : {}),
       }),
     });
 
@@ -77,6 +86,7 @@ export async function POST(req: Request) {
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         let hasText = false;
+        let hitLengthLimit = false;
         const reader = response.body!.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
@@ -100,6 +110,10 @@ export async function POST(req: Request) {
             hasText = true;
             controller.enqueue(encoder.encode(textDelta));
           }
+
+          if (getFinishReason(data) === "length") {
+            hitLengthLimit = true;
+          }
         };
 
         try {
@@ -122,6 +136,8 @@ export async function POST(req: Request) {
             controller.enqueue(
               encoder.encode("❌ AI 服务没有返回内容，请检查 Vercel 中的 AI 服务配置后重试。")
             );
+          } else if (hitLengthLimit) {
+            controller.enqueue(encoder.encode("\n\n（回复达到长度上限，可继续追问以获取后续内容。）"));
           }
         } catch (error: unknown) {
           const message = getProviderErrorMessage(error);
