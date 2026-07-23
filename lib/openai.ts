@@ -1,6 +1,7 @@
 import { createOpenAI } from "@ai-sdk/openai";
 
 const apiKey = process.env.OPENAI_API_KEY;
+export const chatModel = process.env.OPENAI_CHAT_MODEL?.trim() || "gpt-4o-mini";
 
 async function openaiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const response = await fetch(input, init);

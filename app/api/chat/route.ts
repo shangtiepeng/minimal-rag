@@ -1,5 +1,5 @@
 import { streamText, type CoreMessage } from "ai";
-import { getProviderErrorMessage, openai } from "@/lib/openai";
+import { chatModel, getProviderErrorMessage, openai } from "@/lib/openai";
 
 // 允许流式响应最长 60 秒
 export const maxDuration = 60;
@@ -27,7 +27,7 @@ export async function POST(req: Request) {
 
     // 客户端已完成 RAG 检索，context 在 system message 中。
     const result = await streamText({
-      model: openai("gpt-4o-mini"),
+      model: openai(chatModel),
       messages,
     });
 

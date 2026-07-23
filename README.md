@@ -48,6 +48,7 @@ git push -u origin main
 4. 添加环境变量：
    - `OPENAI_API_KEY` - 你的 OpenAI Key
    - `OPENAI_BASE_URL` - 可选。使用第三方 OpenAI 兼容服务时填写 API 基础地址，例如 `https://api.openai.com/v1`
+   - `OPENAI_CHAT_MODEL` - 可选。第三方服务商已开通的聊天模型，例如 `gpt-5.4-mini`
 5. 点击 Deploy，等待构建完成
 
 ## 使用流程
@@ -59,6 +60,6 @@ git push -u origin main
 ## 技术栈
 
 - **前端**: Next.js 14 App Router + Tailwind CSS
-- **AI**: Vercel AI SDK + OpenAI (gpt-4o-mini + text-embedding-3-small)
+- **AI**: Vercel AI SDK + OpenAI 兼容接口（聊天模型可通过 `OPENAI_CHAT_MODEL` 配置；向量模型固定为 `text-embedding-3-small`）
 - **向量存储**: 浏览器 IndexedDB
 - **部署**: Vercel
