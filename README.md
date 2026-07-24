@@ -9,6 +9,7 @@
 - ⚡ 流式输出，实时返回答案
 - 🎯 向量相似度检索，精准匹配相关知识片段
 - 🛟 没有 embedding 接口的聊天服务会自动回退为本地关键词检索
+- 🤖 Agent 模式：使用 LangGraph 编排受限的知识库检索工具，再由 LangChain 调用模型生成带来源的回答
 
 ## 本地开发
 
@@ -57,10 +58,29 @@ git push -u origin main
 1. 打开应用，点击右上角「管理知识库」
 2. 粘贴文档内容，或填入公开网页、TXT、Markdown 链接并提取正文
 3. 在聊天框提问，AI 会基于上传的文档回答
+4. 需要展示 Agent 时，切换顶部的「Agent」模式。该模式会记录知识库检索工具是否执行及命中数量。
+
+## Agent 架构
+
+Agent 模式使用 `@langchain/openai` 对接 OpenAI-compatible 聊天模型，使用 `@langchain/langgraph` 运行受限 ReAct 工作流：
+
+```text
+用户问题 -> 浏览器本地 RAG 初筛 -> LangGraph Agent
+                                      -> search_knowledge_base 工具
+                                      -> 模型基于工具结果回答
+```
+
+- 工具白名单：第一版仅允许 `search_knowledge_base`，不允许任意联网、执行命令或访问内部系统。
+- 执行限制：LangGraph `recursionLimit` 为 6，模型请求超时为 45 秒，避免无限工具循环。
+- 提示词防护：工具返回的文档被视为参考资料，不可覆盖系统规则。
+- 当前演示版：知识片段保存在浏览器 IndexedDB。前端会先取回最多 8 个候选片段，再提交给服务端 Agent 工具；不同浏览器之间不共享知识库。
+
+生产化时应将 IndexedDB 替换为服务端向量库（Qdrant 或 pgvector），由 `search_knowledge_base` 直接从服务端检索；再增加身份鉴权、会话检查点、调用审计和需要人工确认的高风险工具。
 
 ## 技术栈
 
 - **前端**: Next.js 14 App Router + Tailwind CSS
 - **AI**: Vercel AI SDK + OpenAI 兼容接口（聊天模型可通过 `OPENAI_CHAT_MODEL` 配置；向量模型固定为 `text-embedding-3-small`）
+- **Agent**: LangChain OpenAI + LangGraph
 - **向量存储**: 浏览器 IndexedDB
 - **部署**: Vercel

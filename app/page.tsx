@@ -16,6 +16,8 @@ interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  trace?: AgentToolTrace[];
+  sources?: string[];
 }
 
 interface EmbedResponse {
@@ -31,6 +33,25 @@ interface UrlImportResponse {
   source: string;
   text: string;
 }
+
+interface RetrievedDoc {
+  content: string;
+  source?: string;
+}
+
+interface AgentToolTrace {
+  tool: "search_knowledge_base";
+  query: string;
+  resultCount: number;
+}
+
+interface AgentResponse {
+  answer: string;
+  trace: AgentToolTrace[];
+  sources: string[];
+}
+
+type ChatMode = "rag" | "agent";
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败";
@@ -79,6 +100,7 @@ export default function ChatPage() {
   const [isLoadingChunks, setIsLoadingChunks] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [chunks, setChunks] = useState<Chunk[]>([]);
+  const [chatMode, setChatMode] = useState<ChatMode>("rag");
 
   // 页面加载时从 IndexedDB 恢复文档
   useEffect(() => {
@@ -179,7 +201,7 @@ export default function ChatPage() {
   };
 
   // 本地 RAG 检索
-  async function retrieveRelevantDocs(query: string, topK = 3): Promise<string[]> {
+  async function retrieveRelevantDocs(query: string, topK = 3): Promise<RetrievedDoc[]> {
     if (chunks.length === 0) return [];
 
     try {
@@ -199,13 +221,38 @@ export default function ChatPage() {
         .filter((chunk) => (chunk.embeddingMode || "semantic") === embeddingMode)
         .map((chunk) => ({
           content: chunk.content,
+          source: chunk.source,
           similarity: cosineSimilarity(queryEmbedding, chunk.embedding),
         }));
       scored.sort((a, b) => b.similarity - a.similarity);
-      return scored.slice(0, topK).map((s) => s.content);
+      return scored.slice(0, topK).map(({ content, source }) => ({ content, source }));
     } catch {
       return [];
     }
+  }
+
+  async function requestAgentAnswer(question: string, knowledge: RetrievedDoc[]): Promise<void> {
+    const response = await fetch("/api/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, knowledge: knowledge.slice(0, 8) }),
+    });
+    const data = await readJsonResponse<AgentResponse>(response);
+
+    if (!data.answer || typeof data.answer !== "string") {
+      throw new Error("Agent 服务返回的数据格式不正确");
+    }
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: data.answer,
+        trace: Array.isArray(data.trace) ? data.trace : [],
+        sources: Array.isArray(data.sources) ? data.sources : [],
+      },
+    ]);
   }
 
   // 发送消息
@@ -220,63 +267,67 @@ export default function ChatPage() {
     try {
       // RAG 检索
       const relevantDocs = await retrieveRelevantDocs(currentInput);
-      const contextSection = relevantDocs.length > 0
-        ? `\n\n## 参考知识：\n${relevantDocs.map((d, i) => `[${i + 1}] ${d}`).join("\n")}`
-        : "";
+      if (chatMode === "agent") {
+        await requestAgentAnswer(currentInput, relevantDocs);
+      } else {
+        const contextSection = relevantDocs.length > 0
+          ? `\n\n## 参考知识：\n${relevantDocs.map((d, i) => `[${i + 1}] ${d.content}`).join("\n")}`
+          : "";
 
-      const currentTime = new Intl.DateTimeFormat("zh-CN", {
-        dateStyle: "full",
-        timeStyle: "short",
-        hour12: false,
-        timeZone: "Asia/Shanghai",
-      }).format(new Date());
-      const knowledgeInstruction = relevantDocs.length > 0
-        ? "知识库中有参考资料时，优先基于参考资料回答；资料不足时明确说明，不要编造资料中的事实。"
-        : "当前知识库没有相关资料。日常交流、常识和基于当前时间的问题可以直接回答；天气、新闻、行情等实时信息必须说明本应用尚未接入联网搜索，不能编造。";
-      const systemPrompt = `你是一个基于知识库回答问题的助手。当前中国标准时间：${currentTime}。${knowledgeInstruction}${contextSection}`;
+        const currentTime = new Intl.DateTimeFormat("zh-CN", {
+          dateStyle: "full",
+          timeStyle: "short",
+          hour12: false,
+          timeZone: "Asia/Shanghai",
+        }).format(new Date());
+        const knowledgeInstruction = relevantDocs.length > 0
+          ? "知识库中有参考资料时，优先基于参考资料回答；资料不足时明确说明，不要编造资料中的事实。"
+          : "当前知识库没有相关资料。日常交流、常识和基于当前时间的问题可以直接回答；天气、新闻、行情等实时信息必须说明本应用尚未接入联网搜索，不能编造。";
+        const systemPrompt = `你是一个基于知识库回答问题的助手。当前中国标准时间：${currentTime}。${knowledgeInstruction}${contextSection}`;
 
-      // 流式调用 LLM
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: currentInput },
-          ],
-        }),
-      });
+        // 流式调用 LLM
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: currentInput },
+            ],
+          }),
+        });
 
-      if (!res.ok) await readJsonResponse<never>(res);
+        if (!res.ok) await readJsonResponse<never>(res);
 
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("服务未返回可读取的内容");
-      const decoder = new TextDecoder();
-      let assistantContent = "";
-      const assistantId = (Date.now() + 1).toString();
+        const reader = res.body?.getReader();
+        if (!reader) throw new Error("服务未返回可读取的内容");
+        const decoder = new TextDecoder();
+        let assistantContent = "";
+        const assistantId = (Date.now() + 1).toString();
 
-      setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
+        setMessages((prev) => [...prev, { id: assistantId, role: "assistant", content: "" }]);
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        assistantContent += chunk;
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, content: assistantContent } : m
-          )
-        );
-      }
-      assistantContent += decoder.decode();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          assistantContent += chunk;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId ? { ...m, content: assistantContent } : m
+            )
+          );
+        }
+        assistantContent += decoder.decode();
 
-      if (!assistantContent.trim()) {
-        assistantContent = "❌ AI 服务没有返回内容，请检查 Vercel 中的 AI 服务配置后重试。";
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, content: assistantContent } : m
-          )
-        );
+        if (!assistantContent.trim()) {
+          assistantContent = "❌ AI 服务没有返回内容，请检查 Vercel 中的 AI 服务配置后重试。";
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantId ? { ...m, content: assistantContent } : m
+            )
+          );
+        }
       }
     } catch (error: unknown) {
       setMessages((prev) => [
@@ -297,8 +348,8 @@ export default function ChatPage() {
   return (
     <div className="flex flex-col h-screen max-w-3xl mx-auto">
       {/* 顶部栏 */}
-      <header className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
-        <div className="flex items-center gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-y-2 px-4 py-3 border-b border-[var(--border)]">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
           <h1 className="text-lg font-semibold">📚 RAG 问答助手</h1>
           {isLoadingChunks ? (
             <span className="text-xs text-[var(--text-muted)]">加载中...</span>
@@ -307,6 +358,24 @@ export default function ChatPage() {
               {chunksCount} 条知识
             </span>
           )}
+          <div className="flex overflow-hidden rounded-lg border border-[var(--border)]" role="group" aria-label="对话模式">
+            <button
+              type="button"
+              aria-pressed={chatMode === "rag"}
+              onClick={() => setChatMode("rag")}
+              className={`px-2.5 py-1 text-xs transition ${chatMode === "rag" ? "bg-[var(--accent)] text-white" : "bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)]"}`}
+            >
+              RAG 问答
+            </button>
+            <button
+              type="button"
+              aria-pressed={chatMode === "agent"}
+              onClick={() => setChatMode("agent")}
+              className={`border-l border-[var(--border)] px-2.5 py-1 text-xs transition ${chatMode === "agent" ? "bg-[var(--accent)] text-white" : "bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)]"}`}
+            >
+              Agent
+            </button>
+          </div>
         </div>
         <div className="flex gap-2">
           <button
@@ -409,13 +478,23 @@ export default function ChatPage() {
               }`}
             >
               {m.content}
+              {m.role === "assistant" && m.trace && m.trace.length > 0 && (
+                <p className="mt-2 border-t border-[var(--border)] pt-2 text-xs text-[var(--text-muted)]">
+                  工具：知识库检索（命中 {m.trace[0].resultCount} 条）
+                </p>
+              )}
+              {m.role === "assistant" && m.sources && m.sources.length > 0 && (
+                <p className="mt-1 break-words text-xs text-[var(--text-muted)]">
+                  来源：{m.sources.join("、")}
+                </p>
+              )}
             </div>
           </div>
         ))}
         {isLoading && (
           <div className="flex justify-start">
             <div className="bg-[var(--surface)] border border-[var(--border)] px-4 py-2.5 rounded-2xl rounded-bl-md text-sm text-[var(--text-muted)]">
-              思考中...
+              {chatMode === "agent" ? "Agent 正在检索知识库..." : "思考中..."}
             </div>
           </div>
         )}

@@ -1,8 +1,8 @@
 import { createOpenAI } from "@ai-sdk/openai";
 
-const apiKey = process.env.OPENAI_API_KEY;
+export const openaiApiKey = process.env.OPENAI_API_KEY;
 export const chatModel = process.env.OPENAI_CHAT_MODEL?.trim() || "gpt-4o-mini";
-const baseUrl = (process.env.OPENAI_BASE_URL?.trim() || "https://api.openai.com/v1").replace(/\/$/, "");
+export const openaiBaseUrl = (process.env.OPENAI_BASE_URL?.trim() || "https://api.openai.com/v1").replace(/\/$/, "");
 
 async function openaiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const response = await fetch(input, init);
@@ -20,16 +20,16 @@ async function openaiFetch(input: RequestInfo | URL, init?: RequestInit): Promis
 }
 
 export const openai = createOpenAI({
-  baseURL: baseUrl,
-  apiKey: apiKey || "",
+  baseURL: openaiBaseUrl,
+  apiKey: openaiApiKey || "",
   fetch: openaiFetch,
 });
 
 export async function openaiApiFetch(path: string, init: RequestInit): Promise<Response> {
   const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${apiKey || ""}`);
+  headers.set("Authorization", `Bearer ${openaiApiKey || ""}`);
 
-  return openaiFetch(`${baseUrl}/${path.replace(/^\//, "")}`, {
+  return openaiFetch(`${openaiBaseUrl}/${path.replace(/^\//, "")}`, {
     ...init,
     headers,
   });
@@ -69,7 +69,7 @@ export function getProviderErrorMessage(error: unknown): string {
     return "AI 服务认证失败。请检查 Vercel 中的 OPENAI_API_KEY 是否有效，并确认它属于当前 OPENAI_BASE_URL 对应的服务。";
   }
 
-  if (!apiKey) {
+  if (!openaiApiKey) {
     return "未配置 OPENAI_API_KEY。请在 Vercel 的 Production 环境变量中配置后重新部署。";
   }
 
