@@ -9,7 +9,7 @@
 - ⚡ 流式输出，实时返回答案
 - 🎯 向量相似度检索，精准匹配相关知识片段
 - 🛟 没有 embedding 接口的聊天服务会自动回退为本地关键词检索
-- 🤖 Agent 模式：使用 LangGraph 编排受限的知识库检索工具，再由 LangChain 调用模型生成带来源的回答
+- 🤖 Agent 模式：使用 LangGraph 编排固定的知识库检索流程，再由 LangChain 调用模型生成带来源的回答
 
 ## 本地开发
 
@@ -62,16 +62,16 @@ git push -u origin main
 
 ## Agent 架构
 
-Agent 模式使用 `@langchain/openai` 对接 OpenAI-compatible 聊天模型，使用 `@langchain/langgraph` 运行受限 ReAct 工作流：
+Agent 模式使用 `@langchain/openai` 对接 OpenAI-compatible 聊天模型，使用 `@langchain/langgraph` 运行受限的固定工作流：
 
 ```text
-用户问题 -> 浏览器本地 RAG 初筛 -> LangGraph Agent
-                                      -> search_knowledge_base 工具
-                                      -> 模型基于工具结果回答
+用户问题 -> 浏览器本地 RAG 初筛 -> LangGraph 检索节点
+                                      -> search_knowledge_base 工具节点
+                                      -> LangGraph 回答节点
 ```
 
 - 工具白名单：第一版仅允许 `search_knowledge_base`，不允许任意联网、执行命令或访问内部系统。
-- 执行限制：LangGraph `recursionLimit` 为 6，模型请求超时为 45 秒，避免无限工具循环。
+- 执行限制：知识库场景固定为“检索一次、工具执行一次、回答一次”，最多两次模型调用；每次模型请求超时为 20 秒，避免工具循环和 Vercel 超时。
 - 提示词防护：工具返回的文档被视为参考资料，不可覆盖系统规则。
 - 当前演示版：知识片段保存在浏览器 IndexedDB。前端会先取回最多 8 个候选片段，再提交给服务端 Agent 工具；不同浏览器之间不共享知识库。
 
