@@ -65,15 +65,21 @@ git push -u origin main
 Agent 模式使用 `@langchain/openai` 对接 OpenAI-compatible 聊天模型，使用 `@langchain/langgraph` 运行受限的固定工作流：
 
 ```text
-用户问题 -> 浏览器本地 RAG 初筛 -> LangGraph 检索节点
-                                      -> search_knowledge_base 工具节点
+用户问题 -> 浏览器本地 RAG 初筛 -> LangGraph Agent 节点
+                                      -> 知识库 / 时间 / 联网搜索工具
                                       -> LangGraph 回答节点
 ```
 
-- 工具白名单：第一版仅允许 `search_knowledge_base`，不允许任意联网、执行命令或访问内部系统。
+- 工具白名单：仅开放下列受控工具，不允许任意联网、执行命令或访问内部系统。
 - 执行限制：知识库场景固定为“检索一次、工具执行一次、回答一次”，最多两次模型调用；每次模型请求超时为 20 秒，避免工具循环和 Vercel 超时。
 - 提示词防护：工具返回的文档被视为参考资料，不可覆盖系统规则。
 - 当前演示版：知识片段保存在浏览器 IndexedDB。前端会先取回最多 8 个候选片段，再提交给服务端 Agent 工具；不同浏览器之间不共享知识库。
+
+当前工具白名单：
+
+- `search_knowledge_base(query)`：查询已上传的资料。
+- `get_current_time(timeZone)`：服务端计算日期、时间与星期，不需要联网。
+- `search_web(query)`：通过 Tavily 查询公开互联网，仅用于天气、新闻、行情、最新变化等实时问题；需要在 Vercel 服务端配置 `TAVILY_API_KEY`。
 
 生产化时应将 IndexedDB 替换为服务端向量库（Qdrant 或 pgvector），由 `search_knowledge_base` 直接从服务端检索；再增加身份鉴权、会话检查点、调用审计和需要人工确认的高风险工具。
 

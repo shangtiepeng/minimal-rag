@@ -40,9 +40,15 @@ interface RetrievedDoc {
 }
 
 interface AgentToolTrace {
-  tool: "search_knowledge_base";
+  tool: "search_knowledge_base" | "search_web" | "get_current_time";
   query: string;
   resultCount: number;
+}
+
+function getToolLabel(trace: AgentToolTrace): string {
+  if (trace.tool === "search_web") return `联网搜索（命中 ${trace.resultCount} 条）`;
+  if (trace.tool === "get_current_time") return "当前时间";
+  return `知识库检索（命中 ${trace.resultCount} 条）`;
 }
 
 interface AgentResponse {
@@ -480,7 +486,7 @@ export default function ChatPage() {
               {m.content}
               {m.role === "assistant" && m.trace && m.trace.length > 0 && (
                 <p className="mt-2 border-t border-[var(--border)] pt-2 text-xs text-[var(--text-muted)]">
-                  工具：知识库检索（命中 {m.trace[0].resultCount} 条）
+                  工具：{getToolLabel(m.trace[0])}
                 </p>
               )}
               {m.role === "assistant" && m.sources && m.sources.length > 0 && (
