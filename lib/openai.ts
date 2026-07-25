@@ -3,9 +3,44 @@ import { createOpenAI } from "@ai-sdk/openai";
 export const openaiApiKey = process.env.OPENAI_API_KEY;
 export const chatModel = process.env.OPENAI_CHAT_MODEL?.trim() || "gpt-4o-mini";
 export const openaiBaseUrl = (process.env.OPENAI_BASE_URL?.trim() || "https://api.openai.com/v1").replace(/\/$/, "");
+const RETRY_DELAYS_MS = [400, 1_200];
 
-async function openaiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const response = await fetch(input, init);
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function canRetry(init?: RequestInit): boolean {
+  return init?.body === undefined || typeof init.body === "string";
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 502 || status === 503 || status === 504;
+}
+
+async function fetchWithRetry(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      const response = await fetch(input, init);
+      const shouldRetry = canRetry(init) && isRetryableStatus(response.status) && attempt < RETRY_DELAYS_MS.length;
+      if (shouldRetry) {
+        await wait(RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+
+      return response;
+    } catch (error: unknown) {
+      lastError = error;
+      if (!canRetry(init) || attempt === RETRY_DELAYS_MS.length) throw error;
+      await wait(RETRY_DELAYS_MS[attempt]);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("AI 服务请求失败");
+}
+
+async function validateOpenAIResponse(response: Response): Promise<Response> {
   const contentType = response.headers.get("content-type")?.toLowerCase() || "";
 
   // A misconfigured base URL can return a provider's web page with HTTP 200.
@@ -21,6 +56,10 @@ async function openaiFetch(input: RequestInfo | URL, init?: RequestInit): Promis
   }
 
   return response;
+}
+
+export async function openaiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return validateOpenAIResponse(await fetchWithRetry(input, init));
 }
 
 export const openai = createOpenAI({

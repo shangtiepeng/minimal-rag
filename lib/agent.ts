@@ -5,7 +5,7 @@ import { ToolNode, toolsCondition } from "@langchain/langgraph/prebuilt";
 import { ChatOpenAI } from "@langchain/openai";
 import { z } from "zod";
 import { createKeywordEmbedding } from "@/lib/local-embedding";
-import { chatModel, openaiApiKey, openaiBaseUrl } from "@/lib/openai";
+import { chatModel, openaiApiKey, openaiBaseUrl, openaiFetch } from "@/lib/openai";
 import { isWebSearchAvailable, searchWeb } from "@/lib/web-search";
 
 const MAX_TOOL_RESULTS = 4;
@@ -109,7 +109,7 @@ function createChatModel(): ChatOpenAI {
   return new ChatOpenAI({
     model: chatModel,
     apiKey: openaiApiKey,
-    configuration: { baseURL: openaiBaseUrl },
+    configuration: { baseURL: openaiBaseUrl, fetch: openaiFetch },
     temperature: 0.2,
     maxTokens: 768,
     maxRetries: 1,
