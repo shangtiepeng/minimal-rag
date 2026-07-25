@@ -17,7 +17,7 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   trace?: AgentToolTrace[];
-  sources?: string[];
+  sources?: AgentSource[];
 }
 
 interface EmbedResponse {
@@ -45,6 +45,11 @@ interface AgentToolTrace {
   resultCount: number;
 }
 
+interface AgentSource {
+  title: string;
+  url?: string;
+}
+
 function getToolLabel(trace: AgentToolTrace): string {
   if (trace.tool === "search_web") return `联网搜索（命中 ${trace.resultCount} 条）`;
   if (trace.tool === "get_current_time") return "当前时间";
@@ -54,7 +59,7 @@ function getToolLabel(trace: AgentToolTrace): string {
 interface AgentResponse {
   answer: string;
   trace: AgentToolTrace[];
-  sources: string[];
+  sources: AgentSource[];
 }
 
 type ChatMode = "rag" | "agent";
@@ -68,6 +73,22 @@ function getResponseError(data: unknown, fallback: string): string {
     return data.error;
   }
   return fallback;
+}
+
+function isAgentSource(value: unknown): value is AgentSource {
+  if (typeof value !== "object" || value === null || !("title" in value) || typeof value.title !== "string") {
+    return false;
+  }
+
+  if (!("url" in value) || value.url === undefined) return true;
+  if (typeof value.url !== "string") return false;
+
+  try {
+    const url = new URL(value.url);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
@@ -256,7 +277,7 @@ export default function ChatPage() {
         role: "assistant",
         content: data.answer,
         trace: Array.isArray(data.trace) ? data.trace : [],
-        sources: Array.isArray(data.sources) ? data.sources : [],
+        sources: Array.isArray(data.sources) ? data.sources.filter(isAgentSource) : [],
       },
     ]);
   }
@@ -490,9 +511,28 @@ export default function ChatPage() {
                 </p>
               )}
               {m.role === "assistant" && m.sources && m.sources.length > 0 && (
-                <p className="mt-1 break-words text-xs text-[var(--text-muted)]">
-                  来源：{m.sources.join("、")}
-                </p>
+                <div className="mt-2 border-t border-[var(--border)] pt-2 text-xs text-[var(--text-muted)]">
+                  <p>来源</p>
+                  <ul className="mt-1 space-y-1">
+                    {m.sources.map((source, index) => (
+                      <li key={`${source.title}-${index}`} className="min-w-0">
+                        {source.url ? (
+                          <a
+                            href={source.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="block truncate text-[var(--accent)] hover:underline"
+                            title={source.title}
+                          >
+                            [{index + 1}] {source.title}
+                          </a>
+                        ) : (
+                          <span className="block truncate" title={source.title}>[{index + 1}] {source.title}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </div>
           </div>
