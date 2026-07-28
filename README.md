@@ -85,6 +85,7 @@ Agent 模式使用 `@langchain/openai` 对接 OpenAI-compatible 聊天模型，�
 
 ## 技术栈
 
+
 - **前端**: Next.js 14 App Router + Tailwind CSS
 - **AI**: Vercel AI SDK + OpenAI 兼容接口（聊天模型可通过 `OPENAI_CHAT_MODEL` 配置；向量模型固定为 `text-embedding-3-small`）
 - **Agent**: LangChain OpenAI + LangGraph

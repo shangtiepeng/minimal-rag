@@ -51,6 +51,52 @@ function getFinishReason(data: unknown): string | undefined {
   return typeof finishReason === "string" ? finishReason : undefined;
 }
 
+function getCompletionText(data: unknown): string {
+  if (typeof data !== "object" || data === null || !("choices" in data) || !Array.isArray(data.choices)) {
+    return "";
+  }
+
+  const content = data.choices[0]?.message?.content;
+  return typeof content === "string" ? content.trim() : "";
+}
+
+function isGatewayFailure(error: unknown): boolean {
+  return error instanceof Error && /\b(?:502|503|504)\b/i.test(error.message);
+}
+
+function createCompletionRequest(messages: CoreMessage[], stream: boolean): RequestInit {
+  return {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: chatModel,
+      messages,
+      stream,
+      ...(chatModel.startsWith("gpt-5") ? { max_completion_tokens: 1024 } : {}),
+    }),
+  };
+}
+
+async function requestNonStreamingCompletion(messages: CoreMessage[]): Promise<Response> {
+  const response = await openaiApiFetch("chat/completions", createCompletionRequest(messages, false));
+
+  if (!response.ok) {
+    throw new Error(getUpstreamErrorMessage(await response.text()));
+  }
+
+  const data: unknown = await response.json();
+  const text = getCompletionText(data);
+  if (!text) throw new Error("AI 服务没有返回可显示的内容");
+
+  const suffix = getFinishReason(data) === "length" ? "\n\n（回复达到长度上限，可继续追问以获取后续内容。）" : "";
+  return new Response(`${text}${suffix}`, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+    },
+  });
+}
+
 export async function POST(req: Request) {
   try {
     const body: unknown = await req.json();
@@ -62,19 +108,18 @@ export async function POST(req: Request) {
       return Response.json({ error: "messages 必须是有效的消息数组" }, { status: 400 });
     }
 
-    // GPT-5 requires max_completion_tokens, which this older AI SDK cannot send.
-    const response = await openaiApiFetch("chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: chatModel,
-        messages,
-        stream: true,
-        ...(chatModel.startsWith("gpt-5") ? { max_completion_tokens: 1024 } : {}),
-      }),
-    });
+    let response: Response;
+    try {
+      response = await openaiApiFetch("chat/completions", createCompletionRequest(messages, true));
+    } catch (error: unknown) {
+      if (isGatewayFailure(error)) return await requestNonStreamingCompletion(messages);
+      throw error;
+    }
 
     if (!response.ok) {
+      if (response.status === 502 || response.status === 503 || response.status === 504) {
+        return await requestNonStreamingCompletion(messages);
+      }
       throw new Error(getUpstreamErrorMessage(await response.text()));
     }
 
