@@ -64,6 +64,13 @@ interface AgentResponse {
 
 type ChatMode = "rag" | "agent";
 
+type ApiConversationMessage = Pick<Message, "role" | "content">;
+
+const MAX_CONTEXT_MESSAGES = 12;
+const MAX_CONTEXT_MESSAGE_LENGTH = 2_000;
+const MAX_RETRIEVAL_CONTEXT_MESSAGES = 4;
+const MAX_RETRIEVAL_CONTEXT_LENGTH = 600;
+
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败";
 }
@@ -110,6 +117,31 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
   }
 
   return data as T;
+}
+
+function truncateText(text: string, maxLength: number): string {
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function toApiConversationMessages(history: Message[]): ApiConversationMessage[] {
+  return history
+    .map((message) => ({
+      role: message.role,
+      content: truncateText(message.content.trim(), MAX_CONTEXT_MESSAGE_LENGTH),
+    }))
+    .filter((message) => message.content.length > 0)
+    .slice(-MAX_CONTEXT_MESSAGES);
+}
+
+function buildRetrievalQuery(history: Message[], currentInput: string): string {
+  const recentContext = toApiConversationMessages(history)
+    .slice(-MAX_RETRIEVAL_CONTEXT_MESSAGES)
+    .map((message) => {
+      const label = message.role === "user" ? "用户" : "助手";
+      return `${label}: ${truncateText(message.content, MAX_RETRIEVAL_CONTEXT_LENGTH)}`;
+    });
+
+  return [...recentContext, `用户: ${currentInput.trim()}`].join("\n");
 }
 
 export default function ChatPage() {
@@ -258,11 +290,15 @@ export default function ChatPage() {
     }
   }
 
-  async function requestAgentAnswer(question: string, knowledge: RetrievedDoc[]): Promise<void> {
+  async function requestAgentAnswer(
+    question: string,
+    knowledge: RetrievedDoc[],
+    history: ApiConversationMessage[]
+  ): Promise<void> {
     const response = await fetch("/api/agent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, knowledge: knowledge.slice(0, 8) }),
+      body: JSON.stringify({ question, knowledge: knowledge.slice(0, 8), history }),
     });
     const data = await readJsonResponse<AgentResponse>(response);
 
@@ -292,10 +328,12 @@ export default function ChatPage() {
     setIsLoading(true);
 
     try {
+      const history = toApiConversationMessages(messages);
+      const retrievalQuery = buildRetrievalQuery(messages, currentInput);
       // RAG 检索
-      const relevantDocs = await retrieveRelevantDocs(currentInput);
+      const relevantDocs = await retrieveRelevantDocs(retrievalQuery);
       if (chatMode === "agent") {
-        await requestAgentAnswer(currentInput, relevantDocs);
+        await requestAgentAnswer(currentInput, relevantDocs, history);
       } else {
         const contextSection = relevantDocs.length > 0
           ? `\n\n## 参考知识：\n${relevantDocs.map((d, i) => `[${i + 1}] ${d.content}`).join("\n")}`
@@ -319,6 +357,7 @@ export default function ChatPage() {
           body: JSON.stringify({
             messages: [
               { role: "system", content: systemPrompt },
+              ...history,
               { role: "user", content: currentInput },
             ],
           }),

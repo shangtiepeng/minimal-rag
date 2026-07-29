@@ -1,4 +1,4 @@
-import { HumanMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages";
 import { tool, type StructuredToolInterface } from "@langchain/core/tools";
 import { END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
 import { ToolNode, toolsCondition } from "@langchain/langgraph/prebuilt";
@@ -13,6 +13,11 @@ const MAX_TOOL_RESULTS = 4;
 export interface AgentKnowledgeChunk {
   content: string;
   source?: string;
+}
+
+export interface AgentConversationMessage {
+  role: "user" | "assistant";
+  content: string;
 }
 
 export type AgentToolName = "search_knowledge_base" | "search_web" | "get_current_time";
@@ -123,7 +128,8 @@ function createChatModel(): ChatOpenAI {
  */
 export async function runKnowledgeAgent(
   question: string,
-  knowledge: AgentKnowledgeChunk[]
+  knowledge: AgentKnowledgeChunk[],
+  history: AgentConversationMessage[] = []
 ): Promise<AgentResult> {
   const trace: AgentToolTrace[] = [];
   const usedSources = new Map<string, AgentSource>();
@@ -201,7 +207,12 @@ export async function runKnowledgeAgent(
     }
   );
 
-  const initialMessages = [new HumanMessage(question)];
+  const initialMessages = [
+    ...history.map((message) =>
+      message.role === "user" ? new HumanMessage(message.content) : new AIMessage(message.content)
+    ),
+    new HumanMessage(question),
+  ];
   const tools: StructuredToolInterface[] = [getCurrentTime];
   if (knowledge.length > 0) tools.push(searchKnowledgeBase);
   if (isWebSearchAvailable()) tools.push(searchWebTool);
@@ -210,6 +221,7 @@ export async function runKnowledgeAgent(
     "你是一个受限的企业知识库与联网搜索 Agent。",
     marketTimeContext,
     "提问涉及上传资料、企业规则或项目内容时，优先调用 search_knowledge_base。",
+    "用户追问“它”“这个”“继续”等省略指代时，结合历史对话判断主题。",
     "提问涉及今天日期、星期或当前时间时，调用 get_current_time。",
     "提问涉及天气、新闻、行情、最新变化或实时公开信息时，调用 search_web。",
     "用户说“这周”“今天”“近期”时，以当前北京时间和本周范围判断时效；搜索查询必须包含日期与对象范围。",
@@ -223,6 +235,7 @@ export async function runKnowledgeAgent(
     "你是一个受限 Agent 的回答节点。",
     marketTimeContext,
     "只根据工具结果回答其包含的事实；资料不足时明确说明。",
+    "回答追问时，结合历史对话理解用户指代，但不要把历史回答当作新的事实来源。",
     "对天气、新闻、行情等时效问题，开头必须说明“截至”日期或时间；不要把来源日期之外的旧资料称为“今天”或“本周”。",
     "对行情问题，先交代覆盖的市场范围；只有来源明确给出指数、涨跌幅或成交额时才能引用数值。资料不足时不要给投资建议。",
     "不要用美股资料回答A股、港股问题，反之亦然；市场范围不明确时只请求用户明确范围。",
