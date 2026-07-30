@@ -79,11 +79,14 @@ export async function openaiApiFetch(path: string, init: RequestInit): Promise<R
 }
 
 function getStatusCode(error: unknown): number | undefined {
-  if (typeof error !== "object" || error === null || !("statusCode" in error)) {
+  if (typeof error !== "object" || error === null) {
     return undefined;
   }
 
-  return typeof error.statusCode === "number" ? error.statusCode : undefined;
+  if ("statusCode" in error && typeof error.statusCode === "number") return error.statusCode;
+  if ("status" in error && typeof error.status === "number") return error.status;
+
+  return undefined;
 }
 
 function getResponseText(error: unknown): string | undefined {
@@ -96,7 +99,10 @@ function getResponseText(error: unknown): string | undefined {
 
 export function getProviderErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "AI 服务请求失败";
-  const statusCode = getStatusCode(error);
+  const statusCode = getStatusCode(error) ?? (() => {
+    const match = message.match(/\b(4\d{2}|5\d{2})\b/);
+    return match ? Number(match[1]) : undefined;
+  })();
   const responseText = getResponseText(error);
 
   const receivedHtml =

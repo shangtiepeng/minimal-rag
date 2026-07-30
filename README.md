@@ -9,7 +9,7 @@
 - ⚡ 流式输出，实时返回答案
 - 🎯 向量相似度检索，精准匹配相关知识片段
 - 🛟 没有 embedding 接口的聊天服务会自动回退为本地关键词检索
-- 🤖 Agent 模式：使用 LangGraph 编排固定的知识库检索流程，再由 LangChain 调用模型生成带来源的回答
+- 🤖 Agent 模式：使用受限的两阶段流程规划工具调用，再生成带来源的回答
 
 ## 本地开发
 
@@ -62,12 +62,12 @@ git push -u origin main
 
 ## Agent 架构
 
-Agent 模式使用 `@langchain/openai` 对接 OpenAI-compatible 聊天模型，使用 `@langchain/langgraph` 运行受限的固定工作流：
+Agent 模式复用普通问答的 OpenAI-compatible 接口。模型先通过普通 JSON 响应规划是否调用工具，工具执行后再生成最终回答：
 
 ```text
-用户问题 -> 浏览器本地 RAG 初筛 -> LangGraph Agent 节点
+用户问题 -> 浏览器本地 RAG 初筛 -> Agent 规划节点
                                       -> 知识库 / 时间 / 联网搜索工具
-                                      -> LangGraph 回答节点
+                                      -> Agent 回答节点
 ```
 
 - 工具白名单：仅开放下列受控工具，不允许任意联网、执行命令或访问内部系统。
@@ -88,6 +88,6 @@ Agent 模式使用 `@langchain/openai` 对接 OpenAI-compatible 聊天模型，�
 
 - **前端**: Next.js 14 App Router + Tailwind CSS
 - **AI**: Vercel AI SDK + OpenAI 兼容接口（聊天模型可通过 `OPENAI_CHAT_MODEL` 配置；向量模型固定为 `text-embedding-3-small`）
-- **Agent**: LangChain OpenAI + LangGraph
+- **Agent**: 受限 JSON 规划 + 白名单工具执行
 - **向量存储**: 浏览器 IndexedDB
 - **部署**: Vercel
